@@ -1,0 +1,25 @@
+esphome:
+  includes:
+    - <path to file>\myMax30205.h       
+
+i2c:
+  id: i2c0
+  sda: GPIO21
+  scl: GPIO22
+  scan: true 
+
+sensor:  
+- id: sensor_max30205
+  platform: custom 
+  lambda: |-
+    auto my_sensor = new myMax30205();
+    App.register_component(my_sensor);
+    return {my_sensor};
+  sensors:
+  - id: sensor_max30205_1
+    name: "MAX30205 Sensor"
+    unit_of_measurement: °C
+    accuracy_decimals: 1    
+    device_class: temperature    
+    icon: "mdi:thermometer"
+    state_class: measurement
