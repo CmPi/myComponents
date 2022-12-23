@@ -39,7 +39,6 @@ class LacrosseProtocol : public RemoteProtocol<LacrosseData> {
   bool bIsWs7kProtocol(RemoteReceiveData src);
   optional<LacrosseData> decodeTx(RemoteReceiveData src);
   optional<LacrosseData> decodeWs(RemoteReceiveData src);
-  bool readWsNibbles(RemoteReceiveData &src, uint8_t iNum, uint8_t *aDigits[]);
 };
 
 

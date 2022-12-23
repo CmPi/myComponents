@@ -146,9 +146,8 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
     return {};
   }
 
-  ESP_LOGD(TAG, "WS Type: %d", out.type);
-
-  ESP_LOGD(TAG, "WS Address: %d", out.address);
+  ESP_LOGD(TAG, "Sensor Address: %d", out.address);
+  ESP_LOGD(TAG, "Sensor Type: %d", out.type); // Physical quantity
 
   uint8_t iNumDigits;
   uint8_t aDigits[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }; // 10 next nibbles are digits in BCD
@@ -191,19 +190,25 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
     } else {
       aDigits[iDigit] = iTmp;
       iComputeXor =   iComputeXor ^ iTmp;
-      iComputeXor = ( iComputeXor + iTmp ) & 0xF;
+      iComputeSum = ( iComputeXor + iTmp ) & 0xF;
     }
   }
 
   uint8_t iCheckXor = this->readWsNibble(src);
-  if (iXor==0xff) {
+  if (iCheckXor==0xff) {
     return {};
+  }
+  ESP_LOGV( TAG, "XOR: %02X %02X", iComputeXor, iCheckXor ); 
+  if (iComputeXor!=iCheckXor) {
+    ESP_LOGW( TAG, "XOR check failed"); 
+    return {}
   }
 
   uint8_t iCheckSum = this->readWsNibble(src);
-  if (iSum==0xff) {
+  if (iCheckSum==0xff) {
     return {};
   }
+  ESP_LOGD( TAG, "SUM: %02X %02X", iComputeSum, iCheckSum ); 
 
   switch (out.type) {
 
@@ -219,7 +224,7 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
     case 3: // WS7000-15 wind sensor - 10 blocks
      break;
 
-    case 4: // WS7000-20 - 14 blocks - 12 remaining - 10 digits - XOR - SUM
+    case 4: { // WS7000-20 - 14 blocks - 12 remaining - 10 digits - XOR - SUM
       float fTemperature =                        10*aDigits[2] + aDigits[1] + ( 0.0 + aDigits[0] )/10;
       float fPression    = 200 + 100*aDigits[8] + 10*aDigits[7] + aDigits[6] + ( 0.0 + aDigits[9] )/10;
       float fHumidity    =                        10*aDigits[5] + aDigits[4] + ( 0.0 + aDigits[3] )/10;
@@ -227,12 +232,12 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
        fTemperature = -fTemperature;
        out.address = out.address & 0x7; 
       }
-      ESP_LOGD( TAG, "Pression: %f", fPression );
-      ESP_LOGD( TAG, "Humidité: %f", fHumidity );
-      ESP_LOGD( TAG, "Temperature: %f", fTemperature );
+      ESP_LOGV( TAG, "Pression: %f", fPression );
+      ESP_LOGV( TAG, "Humidité: %f", fHumidity );
+      ESP_LOGV( TAG, "Temperature: %f", fTemperature );
       sprintf(out.buf, "WS%01X%01XP=%.1f;WS%01X%01X0=%.1f;WS%01X%01XE=%.1f", out.address, out.type, fPression, out.address, out.type, fTemperature, out.address, out.type,fHumidity );
       break;
-
+    }
     case 5: // WS2500-19 - 11 blocks - 9 remaining - 7 digits - XOR - SUM
      break; 
 
@@ -318,17 +323,6 @@ uint8_t LacrosseProtocol::readWsNibble(RemoteReceiveData &src) {
   ESP_LOGD( TAG, "WS not starting with one" );
   return 0xff; // this nibble did not start with a 1
 } 
-
-bool LacrosseProtocol::readWsNibbles( RemoteReceiveData &src, uint8_t iNum, uint8_t *aDigits[] ) {
-  for( uint8_t iDigit = 0 ; iDigit<10; iDigit++ ) {
-    uint8_t iTmp = this->readWsNibble(src);
-    if (iTmp==0xff) {
-      return {};
-    } else {
-      aDigits[iDigit] = iTmp;
-    }
-  }
-}
 
 
 }  // namespace remote_base
