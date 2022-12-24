@@ -10,6 +10,7 @@ Easy: I have attached a 433MHz receiver (SRX882) to an ESP32.
 
 This *remote_base* component add the support of the 433MHz protocol for those sensors.
 Unfortunately, the original component remote_receiver has not been designed to enable easily the data received to be sent to sensors.
+The workaround is therefore to return a string containing between 1 and 3 sensors values separated with semicolon. Each value has the form xxyyz with xx=TX or WS (protocol), yy=device address and z = sensor type (0: temperature, E: hygrometry, P: pression)
 
 YAML configuration example
 
@@ -30,3 +31,5 @@ YAML configuration example
     filter: 150us
     dump: 
         - lacrosse
+
+    

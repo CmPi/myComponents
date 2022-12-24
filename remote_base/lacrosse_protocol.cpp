@@ -146,35 +146,40 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
     return {};
   }
 
-  ESP_LOGD(TAG, "Sensor Address: %d", out.address);
-  ESP_LOGD(TAG, "Sensor Type: %d", out.type); // Physical quantity
-
   uint8_t iNumDigits;
   uint8_t aDigits[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }; // 10 next nibbles are digits in BCD
 
   switch (out.type) {
 
     case 0: // WS7000-27/28 - 7 blocks
+     ESP_LOGD( TAG, "WS7000-27/28" );
      iNumDigits = 3;
      break;
 
     case 1: // WS7000-22/25 meteo sensor - 10 blocks
+     ESP_LOGD( TAG, "WS7000-22/25" );
      iNumDigits = 6;
      break;
 
     case 2: // WS7000-16 rain sensor
+     ESP_LOGD( TAG, "WS7000-16" );
      iNumDigits = 3;
      break;
 
     case 3: // WS7000-15 wind sensor - 10 blocks
+     ESP_LOGD( TAG, "WS7000-15" );
      iNumDigits = 6;
      break;
 
     case 4: // WS7000-20 - 14 blocks - 12 remaining - 10 digits - XOR - SUM
+     ESP_LOGD( TAG, "WS7000-20" );
      iNumDigits = 10;
      break;
 
     case 5: // WS2500-19 - 11 blocks - 9 remaining - 7 digits - XOR - SUM
+     ESP_LOGD( TAG, "WS2500-19" );
+     ESP_LOGD(TAG, "Sensor Address: %d", out.address);
+     ESP_LOGD(TAG, "Sensor Type: %d", out.type); // Physical quantity
      iNumDigits = 7;
      break; 
 
@@ -201,7 +206,7 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
   ESP_LOGV( TAG, "XOR: %02X %02X", iComputeXor, iCheckXor ); 
   if (iComputeXor!=iCheckXor) {
     ESP_LOGW( TAG, "XOR check failed"); 
-    return {}
+    return {};
   }
 
   uint8_t iCheckSum = this->readWsNibble(src);
@@ -225,26 +230,28 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
      break;
 
     case 4: { // WS7000-20 - 14 blocks - 12 remaining - 10 digits - XOR - SUM
-      float fTemperature =                        10*aDigits[2] + aDigits[1] + ( 0.0 + aDigits[0] )/10;
-      float fPression    = 200 + 100*aDigits[8] + 10*aDigits[7] + aDigits[6] + ( 0.0 + aDigits[9] )/10;
-      float fHumidity    =                        10*aDigits[5] + aDigits[4] + ( 0.0 + aDigits[3] )/10;
-      if (out.address & 0x8) {
-       fTemperature = -fTemperature;
-       out.address = out.address & 0x7; 
+        float fTemperature =                        10*aDigits[2] + aDigits[1] + ( 0.0 + aDigits[0] )/10;
+        float fPression    = 200 + 100*aDigits[8] + 10*aDigits[7] + aDigits[6] + ( 0.0 + aDigits[9] )/10;
+        float fHumidity    =                        10*aDigits[5] + aDigits[4] + ( 0.0 + aDigits[3] )/10;
+        if (out.address & 0x8) {
+         fTemperature = -fTemperature;
+         out.address = out.address & 0x7; 
+        }
+        ESP_LOGV( TAG, "Pression: %f", fPression );
+        ESP_LOGV( TAG, "Humidité: %f", fHumidity );
+        ESP_LOGV( TAG, "Temperature: %f", fTemperature );
+        // send back the three sensors values - 
+        sprintf(out.buf, "WS%01X%01XP=%.1f;WS%01X%01X0=%.1f;WS%01X%01XE=%.1f", out.address, out.type, fPression, out.address, out.type, fTemperature, out.address, out.type,fHumidity );
+        break;
       }
-      ESP_LOGV( TAG, "Pression: %f", fPression );
-      ESP_LOGV( TAG, "Humidité: %f", fHumidity );
-      ESP_LOGV( TAG, "Temperature: %f", fTemperature );
-      sprintf(out.buf, "WS%01X%01XP=%.1f;WS%01X%01X0=%.1f;WS%01X%01XE=%.1f", out.address, out.type, fPression, out.address, out.type, fTemperature, out.address, out.type,fHumidity );
-      break;
-    }
-    case 5: // WS2500-19 - 11 blocks - 9 remaining - 7 digits - XOR - SUM
-     break; 
+    case 5: { // WS2500-19 - 11 blocks - 9 remaining - 7 digits - XOR - SUM
+        float fbrightbess = 0;
+        float fexposition = 0;
+        sprintf(out.buf, "WS%01X%01XL=%.1f;WS%01X%01XX=%.1f", out.address, out.type, fbrightbess, out.address, out.type, fexposition );
+        break; 
+      }
 
   }
-
-
-
 
   ESP_LOGD(TAG, "UPD %s", out.buf );
   return out;
