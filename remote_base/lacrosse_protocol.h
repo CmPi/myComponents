@@ -11,6 +11,7 @@ namespace remote_base {
 
 struct LacrosseData
 {
+    uint8_t iMeasures;
     uint8_t address;
     uint8_t type;
     float value;

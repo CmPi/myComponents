@@ -24,6 +24,22 @@ static const uint32_t WS7K_LONG_US = 800;
 
 static const uint8_t SENSORS_MAX = 30;
 
+// Protocols
+
+static const uint8_t TX_START_SEQUENCE = 0x0A;
+
+// Physical quantities - used to return measures in the buffer
+
+static const char MEASURE_TEMPERATURE    = '0';
+static const char MEASURE_HUMIDITY       = 'E';
+static const char MEASURE_BRIGHTNESS     = 'L';
+static const char MEASURE_EXPOSITION     = 'X';
+static const char MEASURE_RAIN           = 'R';
+static const char MEASURE_WIND_SPEED     = 'S';
+static const char MEASURE_WIND_DIRECTION = 'D';
+
+// 
+
 optional<LacrosseData> LacrosseProtocol::decode(RemoteReceiveData src) {
   if (bIsTx3Protocol(src)) {
     return LacrosseProtocol::decodeTx(src);
@@ -43,6 +59,7 @@ optional<LacrosseData> LacrosseProtocol::decodeTx(RemoteReceiveData src) {
 
   uint64_t packet = 0;
   LacrosseData out{
+    .iMeasures = 0,
     .address = 0,
     .type = 0,
     .value = 0,
@@ -69,22 +86,48 @@ optional<LacrosseData> LacrosseProtocol::decodeTx(RemoteReceiveData src) {
   }
 
   add_lsb = this->readNibble(src);
-  if (add_msb==0xff) {
+  if (add_lsb==0xff) {
     return {};
   }
 
   out.address = add_msb << 3 | (add_lsb & 0xE) >> 1;
 
+
+
+  uint8_t iNumDigits;
   uint8_t aDigits[] = { 0, 0, 0, 0, 0}; // 5 next nibbles are digits in BCD
 
-  for( uint8_t iDigit = 0 ; iDigit<5; iDigit++ ) {
+  switch (out.type) {
+
+    case 0x0: // temperature 
+    case 0xE:
+     iNumDigits = 5;
+     break;
+
+    default: {
+      ESP_LOGD(TAG, "Unknown TX sensor type" );
+      return {} 
+    }
+
+  }
+
+  uint8_t iComputeSum = ( TX_START_SEQUENCE + out.type + add_msb + add_lsb ) & 0xF;
+
+
+
+  for( uint8_t iDigit = 0 ; iDigit<iNumDigits; iDigit++ ) {
     uint8_t iTmp = this->readNibble(src);
     if (iTmp==0xff) {
       return {};
     } else {
       aDigits[iDigit] = iTmp;
+      iComputeSum = ( iComputeSum + iTmp ) & 0xF;
     }
   }
+
+  ESP_LOGD( TAG, "SUM: %02X %02X", iComputeSum, iCheckSum ); 
+
+
 
   if (aDigits[0]==aDigits[3] && aDigits[1]==aDigits[4]) {
     if (out.type==0) { // temperature
@@ -109,11 +152,13 @@ optional<LacrosseData> LacrosseProtocol::decodeTx(RemoteReceiveData src) {
       aSensors[iSameSlot].type = out.type; 
       aSensors[iSameSlot].value = out.value; 
       iSensors++;
+      out.iMeasures = 1;
       sprintf(out.buf, "TX%02X%01X=%.1f", out.address, out.type, out.value );
       ESP_LOGD(TAG, "NEW %s", out.buf );
       return out;
     } else if (iSameSlot!=0xff) { // sensor known
       if (aSensors[iSameSlot].value!=out.value) { // if new value
+        out.iMeasures = 1;
         sprintf(out.buf, "TX%02X%01X=%.1f", out.address, out.type, out.value );
         ESP_LOGD(TAG, "UPD %s", out.buf );
         aSensors[iSameSlot].value=out.value;
@@ -129,6 +174,7 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
 
   uint64_t packet = 0;
   LacrosseData out{
+    .iMeasures = 0,
     .address = 0,
     .type = 0,
     .value = 0,
@@ -181,7 +227,7 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
      ESP_LOGD(TAG, "Sensor Address: %d", out.address);
      ESP_LOGD(TAG, "Sensor Type: %d", out.type); // Physical quantity
      iNumDigits = 7;
-     break; 
+     break;
 
   }
 
@@ -195,8 +241,9 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
     } else {
       aDigits[iDigit] = iTmp;
       iComputeXor =   iComputeXor ^ iTmp;
-      iComputeSum = ( iComputeXor + iTmp ) & 0xF;
+      iComputeSum = ( iComputeSum + iTmp ) & 0xF;
     }
+    ESP_LOGD( TAG, "nibble: %d", iDigit ); 
   }
 
   uint8_t iCheckXor = this->readWsNibble(src);
@@ -213,21 +260,37 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
   if (iCheckSum==0xff) {
     return {};
   }
-  ESP_LOGD( TAG, "SUM: %02X %02X", iComputeSum, iCheckSum ); 
+  iComputeSum = ( iComputeSum + iCheckXor ) & 0xF;
+ 
+  if (iComputeSum!=iCheckSum) {
+    ESP_LOGW( TAG, "Sum check failed"); 
+    ESP_LOGD( TAG, "SUM: %02X %02X", iComputeSum, iCheckSum ); 
+   return {};
+  }
+
+  // float aValues[] = { 0, 0, 0 };
 
   switch (out.type) {
 
     case 0: // WS7000-27/28 - 7 blocks
      break;
 
-    case 1: // WS7000-22/25 meteo sensor - 10 blocks
-     break;
+    case 1: { // WS7000-22/25 meteo sensor - 10 blocks
+        break;
+      }
 
-    case 2: // WS7000-16 rain sensor
-     break;
-
-    case 3: // WS7000-15 wind sensor - 10 blocks
-     break;
+    case 2: {// WS7000-16 rain sensor
+        float fVolume = aDigits[2]<<8 + aDigits[1]<<4 + aDigits[0];
+        sprintf(out.buf, "WS%01X%01XR=%.1f", out.address, out.type, fVolume );
+        out.iMeasures = 1;
+        break;
+      }
+    case 3: { // WS7000-15 wind sensor - 10 blocks
+        float fSpeed     = 10*aDigits[2] + aDigits[1] + ( 0.0 + aDigits[0] )/10;
+        float fDirection = 0;
+        out.iMeasures = 2;
+        break;
+      }
 
     case 4: { // WS7000-20 - 14 blocks - 12 remaining - 10 digits - XOR - SUM
         float fTemperature =                        10*aDigits[2] + aDigits[1] + ( 0.0 + aDigits[0] )/10;
@@ -241,20 +304,28 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
         ESP_LOGV( TAG, "Humidité: %f", fHumidity );
         ESP_LOGV( TAG, "Temperature: %f", fTemperature );
         // send back the three sensors values - 
+        out.iMeasures = 3;
         sprintf(out.buf, "WS%01X%01XP=%.1f;WS%01X%01X0=%.1f;WS%01X%01XE=%.1f", out.address, out.type, fPression, out.address, out.type, fTemperature, out.address, out.type,fHumidity );
         break;
       }
+
     case 5: { // WS2500-19 - 11 blocks - 9 remaining - 7 digits - XOR - SUM
-        float fbrightbess = 0;
-        float fexposition = 0;
-        sprintf(out.buf, "WS%01X%01XL=%.1f;WS%01X%01XX=%.1f", out.address, out.type, fbrightbess, out.address, out.type, fexposition );
+        float fbrightness = (aDigits[2]*100 + aDigits[1]*10 + aDigits[0])*exp10(aDigits[3]);
+        float fexposition =  aDigits[6]<<8 + aDigits[5]<<4 + aDigits[4];
+        out.iMeasures = 1;
+        sprintf(out.buf, "WS%01X%01XL=%.1f", out.address, out.type, fbrightness );
+//        sprintf(out.buf, "WS%01X%01XL=%.1f;WS%01X%01XX=%.1f", out.address, out.type, fbrightbess, out.address, out.type, fexposition );
         break; 
       }
 
   }
 
-  ESP_LOGD(TAG, "UPD %s", out.buf );
-  return out;
+  if (out.iMeasures>0) {
+    ESP_LOGD(TAG, "Measures %s", out.buf );
+    return out;
+  } else {
+    return {};
+  }
 }
 
 void LacrosseProtocol::encode(RemoteTransmitData *dst, const LacrosseData &data) {
@@ -291,7 +362,7 @@ bool LacrosseProtocol::bIsTx3Protocol(RemoteReceiveData src) {
       return false;
     }
   }
-  return (_byte==0x0A);
+  return ( _byte == TX_START_SEQUENCE );
 }
 
 // ============================================================================
