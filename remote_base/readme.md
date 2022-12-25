@@ -15,21 +15,35 @@ The workaround is therefore to return a string containing between 1 and 3 sensor
 YAML configuration example
 
     external_components:
-    - source: 
+      - source: 
         type: local
         path: https://github.com/CmPi/myComponents.git
 
     remote_receiver:
-    id: srx882
-    pin:
+      id: srx882
+      pin:
         number: 4
-        inverted: false
-    mode: 
+      mode: 
         input: true
-        pullup: false
-    tolerance: 35%
-    filter: 150us
-    dump: 
+      tolerance: 35%
+      filter: 150us
+      dump: 
         - lacrosse
-
+   
+    sensor:
+    - platform: custom
+      lambda: |-
+        auto my_Tx3Sensor1 = new LacrosseTx3Sensor();
+        my_Tx3Sensor1->set_address("TX73");
+        App.register_component(my_Tx3Sensor1);
+        return {my_Tx3Sensor1->temperature_sensor, my_Tx3Sensor1->humidity_sensor};
+      sensors:
+        - name: "Temperature Sensor"
+          device_class: temperature
+          unit_of_measurement: °C
+          accuracy_decimals: 1
+        - name: "Humidity Sensor"
+          device_class: humidity
+          unit_of_measurement: "%"
+          accuracy_decimals: 1
     
