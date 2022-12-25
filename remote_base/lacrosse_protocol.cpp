@@ -47,7 +47,7 @@ optional<LacrosseData> LacrosseProtocol::decode(RemoteReceiveData src) {
     ESP_LOGV(TAG, "TX protocol");
     return LacrosseProtocol::decodeTx(src);
   } else if (bIsWs7kProtocol(src)) {
-    ESP_LOGV(TAG, "WS protocol");
+    ESP_LOGD(TAG, "WS protocol");
     return LacrosseProtocol::decodeWs(src);
   } 
   return {};
