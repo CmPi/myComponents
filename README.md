@@ -2,5 +2,5 @@
 
 My ESPHome components
 
-- max30205 sensor
-- remote_base Lacrosse protocol implementation
+- Custom sensor for MAX30205
+- remote_base 433MHz Lacrosse protocol implementation
