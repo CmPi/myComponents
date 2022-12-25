@@ -34,7 +34,7 @@ class LacrosseProtocol : public RemoteProtocol<LacrosseData> {
   optional<LacrosseData> decode(RemoteReceiveData src) override;
   void dump(const LacrosseData &data) override;
  private:
-  uint8_t readNibble(RemoteReceiveData &src);  
+  uint8_t readNibble(RemoteReceiveData &src, bool bUltimate = false);  
   uint8_t readWsNibble(RemoteReceiveData &src);  
   bool bIsTx3Protocol(RemoteReceiveData src);
   bool bIsWs7kProtocol(RemoteReceiveData src);

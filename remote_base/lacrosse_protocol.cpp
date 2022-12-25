@@ -22,6 +22,8 @@ static const uint32_t TX3_BIT_ONE_LOW_US = 1100;
 static const uint32_t WS7K_SHORT_US = 400;
 static const uint32_t WS7K_LONG_US = 800;
 
+static const uint8_t ERROR_PROTOCOL = 0xFF;
+
 static const uint8_t SENSORS_MAX = 30;
 
 // Protocols
@@ -42,9 +44,10 @@ static const char MEASURE_WIND_DIRECTION = 'D';
 
 optional<LacrosseData> LacrosseProtocol::decode(RemoteReceiveData src) {
   if (bIsTx3Protocol(src)) {
+    ESP_LOGV(TAG, "TX protocol");
     return LacrosseProtocol::decodeTx(src);
   } else if (bIsWs7kProtocol(src)) {
-    ESP_LOGD(TAG, "WS protocol");
+    ESP_LOGV(TAG, "WS protocol");
     return LacrosseProtocol::decodeWs(src);
   } 
   return {};
@@ -69,30 +72,32 @@ optional<LacrosseData> LacrosseProtocol::decodeTx(RemoteReceiveData src) {
 
   out.type = this->readNibble(src);
   if (out.type==0xff) {
+    ESP_LOGV(TAG, "Can't decode sensor type" );
     return {};
   }
 
   if (out.type!=0x00 && out.type!=0x0E) {
-    ESP_LOGD(TAG, "Unknown type: %d", out.type);
+    ESP_LOGV(TAG, "Unknown sensor type: %d", out.type);
     return {};
   }
 
   uint8_t add_msb = 0;
-  uint8_t add_lsb = 0;
-
   add_msb = this->readNibble(src);
   if (add_msb==0xff) {
+    ESP_LOGV(TAG, "Can't decode MSB" );
     return {};
   }
 
+  uint8_t add_lsb = 0;
   add_lsb = this->readNibble(src);
   if (add_lsb==0xff) {
+    ESP_LOGV(TAG, "Can't decode LSB" );
     return {};
   }
 
   out.address = add_msb << 3 | (add_lsb & 0xE) >> 1;
 
-
+  // Let's decode the digits
 
   uint8_t iNumDigits;
   uint8_t aDigits[] = { 0, 0, 0, 0, 0}; // 5 next nibbles are digits in BCD
@@ -105,19 +110,19 @@ optional<LacrosseData> LacrosseProtocol::decodeTx(RemoteReceiveData src) {
      break;
 
     default: {
-      ESP_LOGD(TAG, "Unknown TX sensor type" );
-      return {} 
+      ESP_LOGV(TAG, "Not supported TX sensor (type %01X)", out.type );
+      return {}; 
     }
 
   }
 
   uint8_t iComputeSum = ( TX_START_SEQUENCE + out.type + add_msb + add_lsb ) & 0xF;
 
-
-
   for( uint8_t iDigit = 0 ; iDigit<iNumDigits; iDigit++ ) {
     uint8_t iTmp = this->readNibble(src);
     if (iTmp==0xff) {
+      // report bad sensor reading
+      ESP_LOGV(TAG, "Can't decode digit %d for sensor %02X", iDigit, out.address );
       return {};
     } else {
       aDigits[iDigit] = iTmp;
@@ -125,9 +130,18 @@ optional<LacrosseData> LacrosseProtocol::decodeTx(RemoteReceiveData src) {
     }
   }
 
-  ESP_LOGD( TAG, "SUM: %02X %02X", iComputeSum, iCheckSum ); 
+  // Let's verify the Cheksum
 
-
+  uint8_t iCheckSum = this->readNibble(src,true); // special treatment for the last bit of the last nibble
+  if (iCheckSum==0xff) {
+    ESP_LOGD(TAG, "Can't read checksum for sensor %02X", out.address );
+    return {};
+  }
+  if (iComputeSum!=iCheckSum) {
+    ESP_LOGW( TAG, "Sum check failed"); 
+    ESP_LOGD( TAG, "SUM: %02X %02X", iComputeSum, iCheckSum ); 
+    return {};
+  }
 
   if (aDigits[0]==aDigits[3] && aDigits[1]==aDigits[4]) {
     if (out.type==0) { // temperature
@@ -222,7 +236,7 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
      iNumDigits = 10;
      break;
 
-    case 5: // WS2500-19 - 11 blocks - 9 remaining - 7 digits - XOR - SUM
+    case 5: // WS2500-19 - 11 nibbles ( type - address - 7 digits - XOR - SUM )
      ESP_LOGD( TAG, "WS2500-19" );
      ESP_LOGD(TAG, "Sensor Address: %d", out.address);
      ESP_LOGD(TAG, "Sensor Type: %d", out.type); // Physical quantity
@@ -243,7 +257,7 @@ optional<LacrosseData> LacrosseProtocol::decodeWs(RemoteReceiveData src) {
       iComputeXor =   iComputeXor ^ iTmp;
       iComputeSum = ( iComputeSum + iTmp ) & 0xF;
     }
-    ESP_LOGD( TAG, "nibble: %d", iDigit ); 
+    ESP_LOGD( TAG, "nibble: %d over %d", 1+iDigit, iNumDigits ); 
   }
 
   uint8_t iCheckXor = this->readWsNibble(src);
@@ -335,15 +349,26 @@ void LacrosseProtocol::dump(const LacrosseData &data) {
   ESP_LOGD(TAG, "Received Lacrosse: type=%d  address=%d" PRIX8, data.type, data.address);
 }
 
-uint8_t LacrosseProtocol::readNibble(RemoteReceiveData &src) {
+uint8_t LacrosseProtocol::readNibble(RemoteReceiveData &src, bool bUltimate) {
   uint8_t _nibble = 0;
   for (uint8_t bit_counter = 0; bit_counter < 4; bit_counter++) {
-   if (src.expect_item(TX3_BIT_ONE_HIGH_US, TX3_BIT_ONE_LOW_US)) {
+    if (src.expect_item(TX3_BIT_ONE_HIGH_US, TX3_BIT_ONE_LOW_US)) {
       _nibble = (_nibble << 1) | 1;
     } else if (src.expect_item(TX3_BIT_ZERO_HIGH_US, TX3_BIT_ZERO_LOW_US)) {
       _nibble = (_nibble << 1) | 0;
+    } else if (bUltimate && bit_counter==3) {
+      if (src.peek_mark(TX3_BIT_ONE_HIGH_US)) {
+        _nibble = (_nibble << 1) | 1;
+        ESP_LOGV( TAG, "ULTIMATE BIT 1 SAVED" );
+      } else if (src.peek_mark(TX3_BIT_ZERO_HIGH_US)) {
+        ESP_LOGV( TAG, "ULTIMATE BIT 0 SAVED" );
+        _nibble = (_nibble << 1) | 0;
+      } else {
+        return ERROR_PROTOCOL;
+      }
     } else {
-      return 0xff;
+      ESP_LOGV( TAG, "TX not a bit (%d)", bit_counter );
+      return ERROR_PROTOCOL;
     }
   }
   return _nibble;
@@ -392,14 +417,14 @@ uint8_t LacrosseProtocol::readWsNibble(RemoteReceiveData &src) {
       } else if (src.expect_item(WS7K_LONG_US, WS7K_SHORT_US)) {
         _nibble = (_nibble >> 1) | 0;
       } else {
-        ESP_LOGD( TAG, "WS not a bit" );
-        return 0xff; // it was not a 1 neither a 0
+        ESP_LOGD( TAG, "WS not a bit (%d)", bit_counter );
+        return ERROR_PROTOCOL; // it was not a 1 neither a 0
       }
     }
     return _nibble;
   }
   ESP_LOGD( TAG, "WS not starting with one" );
-  return 0xff; // this nibble did not start with a 1
+  return ERROR_PROTOCOL; // this nibble did not start with a 1
 } 
 
 
